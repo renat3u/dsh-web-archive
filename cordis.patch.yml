@@ -1,0 +1,4 @@
+# dsh-web-archive bundle patch layer —— insert 一行：把本插件挂载进 profile 树。
+- insert:
+    - id: dsh-web-archive
+      name: dsh-web-archive
