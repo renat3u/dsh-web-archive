@@ -62,7 +62,7 @@ MutationObserver + rAF 合并重放，React 重渲染/切换会话/流式新卡�
 
 插件以 **bundle 层** 方式挂载进 dsh web profile（`package.json` 里的
 `dsh.bundle.patch` 声明 + 包内 `cordis.patch.yml` 的 `insert` 行），
-`dshClient` 声明让 client-modules 服务自动注入浏览器 bundle。
+`dsh.client` 声明（`platform: "web"`）让 client-modules 服务自动注入浏览器 bundle。
 
 ### 方式一：`dsh plugin`（标准流程，CLI 可用时）
 
@@ -101,8 +101,11 @@ dshx install /dsh-web-archive --enable
 给包补一份 `dsh.plugin.json` 清单后走 registry 的 Web 面板安装（目录或
 tarball 均可）。
 
-> 注：profile 的 `cordis.patch.yml` 是 id 定向覆盖层，不能插入新行；
-> 新增插件行必须走 bundle 的 `insert` 列表（见 `cordis.patch.yml`）。
+> 注（0811+）：profile 的 `cordis.patch.yml` 用户层与 bundle 层走同一个
+> patch 算法，支持 `insert` 行；长驻表面（`dsh web`）通过 watch-only HMR
+> 热重放用户层——新插入的行不需要重启即可挂载（新增的 client 行要等一次
+> 页面刷新让浏览器拿到新的 `window.__DSH_BOOT__` 图）。bundle 层
+> （`dsh.profile.bundles`）的增删则要重启 `dsh web` 才生效。
 
 ## 构建
 
@@ -117,7 +120,7 @@ node build.mjs          # 产出 lib/client.js（esbuild，自包含 iife）
 
 ```
 dsh-web-archive/
-├── package.json        # dshClient + dsh.bundle 声明 + exports["./client"]
+├── package.json        # dsh.client + dsh.bundle 声明 + exports["./client"]
 ├── cordis.patch.yml    # bundle 层：insert 一行挂载本插件
 ├── build.mjs           # 构建脚本（esbuild）
 ├── tsconfig.json
@@ -132,6 +135,9 @@ dsh-web-archive/
 
 ## 兼容性
 
-DOM 契约对齐 20260807T130646Z 快照（`data-chat-flow` /
-`data-chat-call-id` 等）。dsh 后续版本若改动这些属性，更新
-`src/deep-sleep.ts` 顶部的选择器即可。
+DOM 契约对齐 20260811T152241Z 快照（`data-chat-flow` / `data-chat-call-id`
+等；`data-chat-anchor-key` / `data-subcalls` / `data-selected` / `data-state`
+均未变）。0811 构建的 CSS Modules 类名是短哈希，正文检测已从类名字面量
+（`[class*="markdown"]`）改为文本节点 walker（跳过 think 行 / 工具卡片 /
+插件自身的 chip）。dsh 后续版本若改动这些属性，更新 `src/deep-sleep.ts`
+顶部的选择器即可。

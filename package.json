@@ -1,6 +1,6 @@
 {
   "name": "dsh-web-archive",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "DSH Web 客户端插件：把会话里非正文的工具卡片（read/think/bash/...）合并折叠为输入框上方一个可展开的 \"Deep Sleeping...\" 小列表，前端不再显示一堆工具卡片。",
   "private": true,
   "type": "module",
@@ -10,13 +10,13 @@
     "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },
-  "dshClient": {
-    "inject": [],
-    "platform": "web"
-  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [],
+      "platform": "web"
     }
   },
   "scripts": {

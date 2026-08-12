@@ -241,7 +241,8 @@ function findBlocks(flow: HTMLElement): Block[] {
     const thinkRows = thinkRowsIn(el)
     const callRows = callRowsIn(el)
     const isToolPile = callRows.length > 0
-    const hasText = hasBodyText(el)
+    // 只有“纯 think 候选”才需要正文检测：工具组与装饰元素不消耗 walker。
+    const hasText = !isToolPile && thinkRows.length > 0 ? hasBodyText(el) : false
 
     if (isToolPile || (thinkRows.length > 0 && !hasText)) {
       // 堆积（工具组 / 纯 think 消息）→ 并入当前块。
@@ -270,9 +271,20 @@ function findBlocks(flow: HTMLElement): Block[] {
   return blocks
 }
 
-/** 消息是否含正文文本：正文由 MarkdownText 渲染，容器 class 含 “markdown”。 */
+/** 消息是否含正文文本：正文由 MarkdownText 渲染，但 CSS Modules 构建产物
+ * 的类名是短哈希（如 uqINua_body），无法用类名字面量识别。改为文本节点
+ * walker：折叠行（think 推理块 / 工具卡片）与插件自己的 chip 之外的任何
+ * 非空文本都算正文——正文渲染的段落（p/pre/li 等）必然携带这些文本。 */
 function hasBodyText(el: HTMLElement): boolean {
-  return el.querySelector('[class*="markdown"]') !== null
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+  let node: Text | null
+  while ((node = walker.nextNode() as Text | null) !== null) {
+    if (node.data.trim() === '') continue
+    const parent = node.parentElement
+    if (parent !== null && parent.closest('[data-variant="think"], [data-chat-call-id], .dswa-chip') !== null) continue
+    return true
+  }
+  return false
 }
 
 /** 元素内的推理块行：[data-variant="think"] 且无 data-tool。 */

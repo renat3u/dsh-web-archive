@@ -13,7 +13,8 @@
  * 依赖、不注册任何 slot key，因此不会与内置 read/bash/... 的
  * conversation.chat.toolview 注册冲突。识别依据是 ChatView 渲染时写死的
  * 稳定 data 属性（data-chat-flow / data-chat-call-id / data-variant /
- * data-chat-anchor-key），与本快照 (20260807T130646Z) 的 DOM 契约对齐。
+ * data-chat-anchor-key / data-subcalls），与本快照 (20260811T152241Z) 的
+ * DOM 契约对齐。
  */
 import { DeepSleepController } from './deep-sleep.ts'
 
