@@ -64,10 +64,14 @@ MutationObserver + rAF 合并重放，React 重渲染/切换会话/流式新卡�
 `dsh.bundle.patch` 声明 + 包内 `cordis.patch.yml` 的 `insert` 行），
 `dsh.client` 声明（`platform: "web"`）让 client-modules 服务自动注入浏览器 bundle。
 
-### 方式一：`dsh plugin`（标准流程，CLI 可用时）
+> 命令形式：官方约定源码 checkout 场景统一用 `pnpm dsh <args...>` 运行
+> TypeScript 入口并透传参数（见下文「运行与构建」）；npm 全局安装后可直接
+> `dsh <args...>`。下文命令按 `dsh …` 泛称书写。
+
+### 方式一：本地路径
 
 ```sh
-dsh plugin --profile web add file:/dsh-web-archive
+pnpm dsh plugin --profile web add file:/path/to/dsh-web-archive
 ```
 
 `dsh plugin add` 会 pnpm 安装依赖，并把声明了 `dsh.bundle` 的包自动加进
@@ -78,51 +82,60 @@ profile 的 `dsh.profile.bundles` 层列表。
 1. 把插件放进 profile 的 node_modules（pnpm 风格软链）：
 
    ```sh
-   ln -s /dsh-web-archive /root/.dsh/profiles/node_modules/dsh-web-archive
+   ln -s /path/to/dsh-web-archive $DSH_HOME/profiles/node_modules/dsh-web-archive
    ```
 
-2. 在 profile manifest（`/root/.dsh/profiles/web/package.json`）里登记：
+2. 在 profile manifest（`$DSH_HOME/profiles/web/package.json`）里登记：
 
    ```json
-   "dependencies": { "dsh-web-archive": "file:/dsh-web-archive" },
+   "dependencies": { "dsh-web-archive": "file:/path/to/dsh-web-archive" },
    "dsh": { "profile": { "bundles": ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "dsh-web-archive"] } }
    ```
 
-3. 重启 `dsh web`（Ctrl+C 后重新运行启动命令），刷新页面。
+3. 重启 web 表面（源码环境 Ctrl+C 后重跑 `pnpm dsh web`），刷新页面。
 
-### 方式三：marisa / dshx
-
-```sh
-dshx install /dsh-web-archive --enable
-```
-
-### 方式四：plugin-registry / dsh.plugin.json
-
-给包补一份 `dsh.plugin.json` 清单后走 registry 的 Web 面板安装（目录或
-tarball 均可）。
-
-> 注（0811+）：profile 的 `cordis.patch.yml` 用户层与 bundle 层走同一个
-> patch 算法，支持 `insert` 行；长驻表面（`dsh web`）通过 watch-only HMR
+> 注：profile 的 `cordis.patch.yml` 用户层与 bundle 层走同一个 patch
+> 算法，支持 `insert` 行；长驻表面（web profile）通过 watch-only HMR
 > 热重放用户层——新插入的行不需要重启即可挂载（新增的 client 行要等一次
 > 页面刷新让浏览器拿到新的 `window.__DSH_BOOT__` 图）。bundle 层
-> （`dsh.profile.bundles`）的增删则要重启 `dsh web` 才生效。
+> （`dsh.profile.bundles`）的增删则要重启 web 表面才生效。
 
-## 构建
+## 运行与构建
+
+官方源码构建形式（仓库 checkout 内）：
 
 ```sh
-node build.mjs          # 产出 lib/client.js（esbuild，自包含 iife）
+pnpm install      # 安装依赖（一次性）
+pnpm run build    # 准备仓库产物（一次性）
+pnpm dsh web      # 启动 Web UI，无需重新构建
 ```
 
-优先用 PATH 中的 esbuild，否则自动 `pnpm dlx esbuild`。`lib/client.js`
-已随仓库提供，改 `src/` 后重新构建即可。
+`pnpm dsh <args...>` 是官方约定的源码运行形式（`dsh web` 是
+`--profile web` 的别名）。`pnpm install` **不会**把 `dsh` 注册进 shell 的
+全局 PATH——`pnpm dsh` 每次都要带前缀。裸 `dsh` 命令需要 npm 全局安装
+（`npm install -g @deepseek-ai/dsh`），或走官方安装包示例
+`npx @deepseek-ai/dsh web`。开发 client 插件时可另开 `pnpm run dev:web`
+（官方 dev 监视器）：它重建 client bundle 并触发 client-hmr 热替换；新增
+插件行仍需一次页面刷新拿到新的 boot 图。
+
+插件自身 bundle 构建：
+
+```sh
+node build.mjs    # 产出 lib/client.js（esbuild，自包含 iife）
+```
+
+构建走本地 devDependency esbuild（JS API，无 shell 依赖）；仓库根执行
+`npm install`（或 pnpm install）后即可运行。`lib/client.js` 随包提供，
+改 `src/` 后重新构建即可。
+
 
 ## 文件结构
 
 ```
 dsh-web-archive/
-├── package.json        # dsh.client + dsh.bundle 声明 + exports["./client"]
+├── package.json        # dsh.client + dsh.bundle 声明 + npm 发布元数据 + exports["./client"]
 ├── cordis.patch.yml    # bundle 层：insert 一行挂载本插件
-├── build.mjs           # 构建脚本（esbuild）
+├── build.mjs           # 构建脚本（esbuild；prepack 钩子调用）
 ├── tsconfig.json
 ├── src/
 │   ├── index.ts        # host half：空 apply（让插件出现在宿主插件树）
@@ -130,14 +143,16 @@ dsh-web-archive/
 │   └── deep-sleep.ts   # DeepSleepController：折叠/展开核心
 └── lib/
     ├── index.js        # host half 产物
-    └── client.js       # 浏览器 bundle（已构建）
+    ├── client.js       # 浏览器 bundle（已构建）
+    └── types/          # 手写类型声明（index.d.ts / client/index.d.ts）
 ```
 
 ## 兼容性
 
-DOM 契约对齐 20260811T152241Z 快照（`data-chat-flow` / `data-chat-call-id`
-等；`data-chat-anchor-key` / `data-subcalls` / `data-selected` / `data-state`
-均未变）。0811 构建的 CSS Modules 类名是短哈希，正文检测已从类名字面量
-（`[class*="markdown"]`）改为文本节点 walker（跳过 think 行 / 工具卡片 /
-插件自身的 chip）。dsh 后续版本若改动这些属性，更新 `src/deep-sleep.ts`
-顶部的选择器即可。
+DOM 契约基于官方 Web 客户端 ChatView 渲染的稳定 data 属性：
+`data-chat-flow` / `data-chat-call-id` / `data-chat-anchor-key` /
+`data-subcalls` / `data-selected` / `data-state` / `data-variant`。
+当前构建的 CSS Modules 类名是短哈希，正文检测不使用类名字面量，而是文本
+节点 walker（跳过 think 行 / 工具卡片 / 插件自身的 chip），对类名变化
+免疫。官方后续版本若改动这些属性，更新 `src/deep-sleep.ts` 顶部的
+选择器即可。

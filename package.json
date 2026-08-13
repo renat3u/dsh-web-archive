@@ -2,13 +2,23 @@
   "name": "dsh-web-archive",
   "version": "0.1.1",
   "description": "DSH Web 客户端插件：把会话里非正文的工具卡片（read/think/bash/...）合并折叠为输入框上方一个可展开的 \"Deep Sleeping...\" 小列表，前端不再显示一堆工具卡片。",
-  "private": true,
   "type": "module",
   "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
   "exports": {
-    ".": "./lib/index.js",
-    "./client": "./lib/client.js",
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./lib/types/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
     "./package.json": "./package.json"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dsh-external/dsh-web-archive.git"
   },
   "dsh": {
     "bundle": {
@@ -20,11 +30,12 @@
     }
   },
   "scripts": {
-    "build": "node build.mjs"
+    "build": "node build.mjs",
+    "prepack": "node build.mjs"
   },
   "files": [
     "lib",
-    "src"
+    "cordis.patch.yml"
   ],
   "keywords": [
     "dsh",
@@ -32,5 +43,8 @@
     "client-plugin",
     "ui"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "esbuild": "0.25.0"
+  }
 }
