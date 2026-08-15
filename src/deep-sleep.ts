@@ -84,6 +84,8 @@ interface Block {
   rows: HTMLElement[]
   /** 需要随块折叠/展开的容器（工具组元素，避免折叠后残留空白）。 */
   containers: HTMLElement[]
+  /** 块首是工具组节点时：chip 插到 host 之前（host 自身也折叠，不留空壳）。 */
+  chipBefore?: boolean
 }
 
 export class DeepSleepController {
@@ -152,6 +154,8 @@ export class DeepSleepController {
     for (const block of blocks) {
       const { host, rows, containers } = block
       hosts.add(host)
+      // 记录容器映射：点击展开/收起时用同一份容器列表。
+      this.blockContainers.set(host, containers)
 
       const expanded = this.expandedByHost.get(host) ?? false
       // 折叠态下若有行被选中（详情联动），自动展开该块。
@@ -161,7 +165,7 @@ export class DeepSleepController {
       const isExpanded = this.expandedByHost.get(host) ?? false
 
       applyRows(rows, containers, isExpanded)
-      const chip = this.ensureChip(host, rows)
+      const chip = this.ensureChip(host, rows, block.chipBefore === true)
       updateChip(chip, rows.length, isExpanded)
     }
 
@@ -170,6 +174,7 @@ export class DeepSleepController {
       if (!hosts.has(host) || !host.isConnected) {
         chip.remove()
         this.chips.delete(host)
+        this.blockContainers.delete(host)
       }
     }
 
@@ -181,10 +186,19 @@ export class DeepSleepController {
     return this.blockContainers.get(host) ?? []
   }
 
-  /** 创建（或复用）宿主内部的折叠卡片。 */
-  private ensureChip(host: HTMLElement, rows: readonly HTMLElement[]): HTMLButtonElement {
+  /** 创建（或复用）宿主内/宿主前的折叠卡片。chipBefore 时 chip 插在 host
+   * 之前（host 自身已随容器折叠，chip 占据原位置且不留空壳）。 */
+  private ensureChip(host: HTMLElement, rows: readonly HTMLElement[], chipBefore: boolean): HTMLButtonElement {
     const existing = this.chips.get(host)
-    if (existing !== undefined && existing.isConnected && existing.parentElement === host) {
+    if (existing !== undefined && existing.isConnected) {
+      // 复用：确认 chip 位置与当前模式一致，React 重渲染/宿主漂移时修正。
+      if (chipBefore) {
+        if (existing.parentElement !== host.parentElement || existing.nextElementSibling !== host) {
+          host.parentElement?.insertBefore(existing, host)
+        }
+      } else if (existing.parentElement !== host) {
+        host.prepend(existing)
+      }
       return existing
     }
     const chip = document.createElement('button')
@@ -201,8 +215,13 @@ export class DeepSleepController {
       applyRows(rows, this.blockContainers.get(host) ?? [], next)
       updateChip(chip, rows.length, next)
     })
-    // 插到消息/工具组最前（与折叠掉的卡片同一位置）。
-    host.prepend(chip)
+    if (chipBefore) {
+      // 插到工具组节点之前（成为流容器的子元素），工具组节点本身随块折叠。
+      host.parentElement?.insertBefore(chip, host)
+    } else {
+      // 插到消息/工具组最前（与折叠掉的卡片同一位置）。
+      host.prepend(chip)
+    }
     this.chips.set(host, chip)
     return chip
   }
@@ -227,10 +246,10 @@ function findFlow(): HTMLElement | null {
  * 收集流容器里的“折叠块”。规则：
  * - 堆积 = 工具组（工具卡片行）或纯 think 消息（推理块行、无正文文本）；
  * - **连续堆积合并成一块**；
- * - **带正文文本的消息（即使含 think 行）会断开合并**：它的 think 行先并入
- *   前面的块（无块则自成一块），然后正文文本作为分界；
- * - 纯文本消息直接断开；装饰元素（StreamingTail/TurnStatus/hints）不断开。
- * 结果：文本A - [折叠块] - 文本B - [折叠块] - 文本C。
+ * - **带正文文本的 assistant 消息不断开合并**：它的 think 行并入块，其后的
+ *   工具组继续并入同一块——一个回合（user 消息之间）只产生一个折叠块；
+ * - user / context 等带锚节点断开合并；装饰元素不断开。
+ * 结果：文本A - [折叠块] - 文本B - 文本C（同一回合内的工具/思考只占一个折叠块）。
  */
 function findBlocks(flow: HTMLElement): Block[] {
   const blocks: Block[] = []
@@ -243,20 +262,37 @@ function findBlocks(flow: HTMLElement): Block[] {
     const isToolPile = callRows.length > 0
     // 只有“纯 think 候选”才需要正文检测：工具组与装饰元素不消耗 walker。
     const hasText = !isToolPile && thinkRows.length > 0 ? hasBodyText(el) : false
+    const kind = el.getAttribute('data-chat-flow-kind')
 
     if (isToolPile || (thinkRows.length > 0 && !hasText)) {
       // 堆积（工具组 / 纯 think 消息）→ 并入当前块。
       if (run === null) {
-        run = { host: el, rows: [], containers: [] }
+        // 块首：工具组节点自身也折叠（chip 前置到它前面，不留空壳）；
+        // 纯 think 消息则 chip 插在消息内部。
+        const toolLed = isToolPile
+        run = {
+          host: el,
+          rows: [],
+          containers: toolLed ? [el] : [],
+          chipBefore: toolLed,
+        }
         blocks.push(run)
       }
       run.rows.push(...thinkRows, ...callRows)
-      // 工具组随块折叠；若工具组就是块宿主（chip 插在它内部），不能隐藏它。
+      // 工具组随块折叠；若工具组就是块宿主（chip 前置模式），已入 containers。
       if (isToolPile && el !== run.host) {
         run.containers.push(el)
       }
-    } else if (el.hasAttribute('data-chat-anchor-key')) {
-      // 正文消息：think 先并入前面的块（无块则自成一块），然后断开合并。
+      // 纯 think 堆积节点（无正文）随块折叠：折叠后节点本身 display:block
+      // 高度 0，在 flow 的 flex gap 布局下仍占 16px 间距——每多一个思考
+      // 就多一行空白。折叠节点自身即消除该占位（块首 chip 宿主除外）。
+      if (!isToolPile && thinkRows.length > 0 && el !== run.host) {
+        run.containers.push(el)
+      }
+    } else if (kind === 'assistant-step' || kind === 'assistant') {
+      // 正文消息：think 先并入块（无块则自成块）；**不断开合并**——
+      // 同一回合内正文文本之间的工具组并入同一块，避免每多一个工具/
+      // 思考就多一行折叠条（正文文本本身按原样显示）。
       if (thinkRows.length > 0) {
         if (run === null) {
           run = { host: el, rows: [], containers: [] }
@@ -264,6 +300,8 @@ function findBlocks(flow: HTMLElement): Block[] {
         }
         run.rows.push(...thinkRows)
       }
+    } else if (el.hasAttribute('data-chat-anchor-key')) {
+      // 其他带锚节点（user / context / steering 等）：回合边界，断开合并。
       run = null
     }
     // 装饰元素（无 anchor 且无行）不打断合并。
