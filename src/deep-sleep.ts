@@ -82,7 +82,7 @@ interface Block {
   host: HTMLElement
   /** 需要折叠/展开的行（推理块行 + 顶层工具卡片行）。 */
   rows: HTMLElement[]
-  /** 需要随块折叠/展开的容器（工具组元素，避免折叠后残留空白）。 */
+  /** 需要随块折叠/展开的容器（工具组元素 / 折叠后仅剩空壳的 think 消息）。 */
   containers: HTMLElement[]
 }
 
@@ -98,7 +98,7 @@ export class DeepSleepController {
   private expandedByHost = new WeakMap<HTMLElement, boolean>()
   /** 最近一轮 pass 见过的全部行（stop 时统一还原）。 */
   private allRows: HTMLElement[] = []
-  /** host → 该块需要随折叠的容器（工具组元素）。 */
+  /** host → 该块需要随折叠的容器（工具组元素 / 空 think 壳）。 */
   private blockContainers = new Map<HTMLElement, HTMLElement[]>()
 
   start(): void {
@@ -148,10 +148,12 @@ export class DeepSleepController {
 
     const blocks = findBlocks(flow)
     const hosts = new Set<HTMLElement>()
+    const nextContainers = new Map<HTMLElement, HTMLElement[]>()
 
     for (const block of blocks) {
       const { host, rows, containers } = block
       hosts.add(host)
+      nextContainers.set(host, [...containers])
 
       const expanded = this.expandedByHost.get(host) ?? false
       // 折叠态下若有行被选中（详情联动），自动展开该块。
@@ -164,6 +166,9 @@ export class DeepSleepController {
       const chip = this.ensureChip(host, rows)
       updateChip(chip, rows.length, isExpanded)
     }
+
+    // 同步容器引用：click 展开/收起与 stop() 还原都需要最新的容器集合。
+    this.blockContainers = nextContainers
 
     // 移除宿主已不在流里的陈旧 chip（自愈：React 重渲染换掉了宿主元素）。
     for (const [host, chip] of [...this.chips]) {
@@ -243,16 +248,19 @@ function findBlocks(flow: HTMLElement): Block[] {
     const isToolPile = callRows.length > 0
     // 只有“纯 think 候选”才需要正文检测：工具组与装饰元素不消耗 walker。
     const hasText = !isToolPile && thinkRows.length > 0 ? hasBodyText(el) : false
+    const isThinkPile = !isToolPile && thinkRows.length > 0 && !hasText
 
-    if (isToolPile || (thinkRows.length > 0 && !hasText)) {
+    if (isToolPile || isThinkPile) {
       // 堆积（工具组 / 纯 think 消息）→ 并入当前块。
       if (run === null) {
         run = { host: el, rows: [], containers: [] }
         blocks.push(run)
       }
       run.rows.push(...thinkRows, ...callRows)
-      // 工具组随块折叠；若工具组就是块宿主（chip 插在它内部），不能隐藏它。
-      if (isToolPile && el !== run.host) {
+      // 非宿主堆积元素在折叠后若只剩空壳，整个元素随块折叠。
+      // think-only 消息折叠行后高度为 0，但 flex column 的 gap 仍会在
+      // 零高度元素之间累计出大片空白，必须连同容器一起 display:none。
+      if (el !== run.host && (isToolPile || !hasContentOutsideRows(el, thinkRows))) {
         run.containers.push(el)
       }
     } else if (el.hasAttribute('data-chat-anchor-key')) {
@@ -283,6 +291,30 @@ function hasBodyText(el: HTMLElement): boolean {
     const parent = node.parentElement
     if (parent !== null && parent.closest('[data-variant="think"], [data-chat-call-id], .dswa-chip') !== null) continue
     return true
+  }
+  return false
+}
+
+/** 元素里除了会被折叠的行之外，是否还有任何可见内容（文本或非文本盒子）。
+ * 纯 think 消息若除了 think 行外一无所有，折叠后整个 flowItem 高度归零，
+ * 但 flex column 的 gap 仍会为这些零高度项累计空白；反过来，如果消息还带
+ * 图片等非文本内容，则不能隐藏整个容器，避免误伤。 */
+function hasContentOutsideRows(el: HTMLElement, rows: readonly HTMLElement[]): boolean {
+  // 文本内容：折叠行 / chip 之外的非空文本。
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+  let node: Text | null
+  while ((node = walker.nextNode() as Text | null) !== null) {
+    if (node.data.trim() === '') continue
+    const parent = node.parentElement
+    if (parent !== null && parent.closest('[data-variant="think"], [data-chat-call-id], .dswa-chip') !== null) continue
+    return true
+  }
+  // 非文本可见盒子：跳过折叠行与 chip 内部、以及仅作为折叠行祖先的包装层。
+  for (const candidate of el.querySelectorAll<HTMLElement>('*')) {
+    if (candidate.closest('[data-variant="think"], [data-chat-call-id], .dswa-chip') !== null) continue
+    if (rows.some(row => row !== candidate && candidate.contains(row))) continue
+    const rect = candidate.getBoundingClientRect()
+    if (rect.width > 0 && rect.height > 0) return true
   }
   return false
 }
