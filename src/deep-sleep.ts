@@ -140,7 +140,10 @@ export class DeepSleepController {
     const flow = findFlow()
     this.flow = flow
     if (flow === null) {
-      // 没有会话流：清理全部 chip。
+      // 没有会话流：还原上一轮折叠过的行/容器，再清理全部 chip。
+      applyRows(this.allRows, [...this.blockContainers.values()].flat(), true)
+      this.allRows = []
+      this.blockContainers = new Map()
       for (const chip of this.chips.values()) chip.remove()
       this.chips.clear()
       return
@@ -149,6 +152,24 @@ export class DeepSleepController {
     const blocks = findBlocks(flow)
     const hosts = new Set<HTMLElement>()
     const nextContainers = new Map<HTMLElement, HTMLElement[]>()
+    const nextRows = new Set<HTMLElement>()
+    const nextContainerSet = new Set<HTMLElement>()
+
+    for (const block of blocks) {
+      for (const row of block.rows) nextRows.add(row)
+      for (const container of block.containers) nextContainerSet.add(container)
+    }
+
+    // 自愈：上一轮被折叠、但本轮已不再是折叠行/容器的元素，必须还原。
+    // 例如流式渲染中一个 think-only 消息先被并入折叠块隐藏，随后正文文本
+    // 到达使其变为“正文消息”——它不再出现在任何容器集合里，若不在此还原，
+    // 会一直保持 display:none，直到刷新/切换会话。
+    for (const row of this.allRows) {
+      if (!nextRows.has(row) && row.isConnected) row.style.display = ''
+    }
+    for (const container of [...this.blockContainers.values()].flat()) {
+      if (!nextContainerSet.has(container) && container.isConnected) container.style.display = ''
+    }
 
     for (const block of blocks) {
       const { host, rows, containers } = block
